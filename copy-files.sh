@@ -1,8 +1,39 @@
 #!/bin/bash
 
-DIR=${1:-.}
+# Parse command line arguments
+DIR="."
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    -r|--root)
+      DIR="$2"
+      shift 2
+      ;;
+    *)
+      DIR="$1"
+      shift
+      ;;
+  esac
+done
+
+# Check if we're reading from stdin (pipeline) or finding files
+if [ -t 0 ]; then
+  # Not a pipeline, find files in directory
+  INPUT_SOURCE="find \"$DIR\" -type f"
+else
+  # Reading from pipeline
+  INPUT_SOURCE="cat"
+fi
 
 while IFS= read -r f; do
+  # Skip empty lines
+  [[ -z "$f" ]] && continue
+  
+  # Check if file exists and is readable
+  if [[ ! -f "$f" ]] || [[ ! -r "$f" ]]; then
+    echo "Skipping $f (not found or not readable)" >&2
+    continue
+  fi
+  
   if file --mime-type "$f" | grep -q 'text/'; then
     echo "Copying $f"
     
@@ -36,7 +67,7 @@ while IFS= read -r f; do
     OUTPUT="$OUTPUT$(cat "$f")\n"
     OUTPUT="$OUTPUT\`\`\`\n\n"
   fi
-done < <(find "$DIR" -type f)
+done < <(eval "$INPUT_SOURCE")
 
 OS=$(uname)
 
