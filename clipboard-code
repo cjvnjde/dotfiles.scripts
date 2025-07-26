@@ -40,7 +40,6 @@ while IFS= read -r f; do
      [[ "$MIME_TYPE" =~ ^application/(json|javascript|xml|yaml|x-yaml|x-sh|x-shellscript) ]] || \
      [[ "$MIME_TYPE" =~ ^application/(x-httpd-php|x-ruby|x-python) ]] || \
      [[ "$f" =~ \.(tsx?|jsx?|py|rb|go|rs|java|c|cpp|cc|cxx|h|hpp|cs|php|swift|kt|dart|vue|svelte|html|css|scss|sass|less|json|xml|ya?ml|toml|ini|conf|md|sql|r|scala|clj|hs|ex|exs|erl|lua|pl|vim|sh|bash|zsh|fish)$ ]]; then
-    echo "Copying $f"
     
     # Get file extension for code block
     FILENAME=$(basename "$f")
@@ -116,22 +115,4 @@ while IFS= read -r f; do
   fi
 done < <(eval "$INPUT_SOURCE")
 
-OS=$(uname)
-
-OS=$(uname)
-
-if [ "$OS" = "Darwin" ]; then
-  printf "%b" "$OUTPUT" | pbcopy 
-elif [ "$OS" = "Linux" ]; then
-  if command -v wl-copy >/dev/null 2>&1; then
-    printf "%b" "$OUTPUT" | wl-copy
-  else
-    echo "wl-copy not found."
-    exit 1
-  fi
-else
-  echo "Unsupported OS: $OS"
-  exit 1
-fi
-
-echo "Copied to clipboard."
+printf "%b" "$OUTPUT"
