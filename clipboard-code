@@ -15,18 +15,45 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# Array to store processed files (for deduplication)
+# Using a simple approach compatible with older bash versions
+processed_files_list=""
+
+# Function to expand directories and collect files
+expand_path() {
+  local path="$1"
+  if [[ -d "$path" ]]; then
+    # It's a directory, find all files in it
+    find "$path" -type f
+  elif [[ -f "$path" ]]; then
+    # It's a file, output as-is
+    echo "$path"
+  fi
+}
+
 # Check if we're reading from stdin (pipeline) or finding files
 if [ -t 0 ]; then
   # Not a pipeline, find files in directory
   INPUT_SOURCE="find \"$DIR\" -type f"
 else
-  # Reading from pipeline
-  INPUT_SOURCE="cat"
+  # Reading from pipeline, expand directories to files
+  INPUT_SOURCE="while IFS= read -r line; do expand_path \"\$line\"; done"
 fi
 
 while IFS= read -r f; do
   # Skip empty lines
   [[ -z "$f" ]] && continue
+  
+  # Get absolute path for deduplication
+  abs_path=$(realpath "$f" 2>/dev/null || echo "$f")
+  
+  # Skip if already processed
+  if [[ "$processed_files_list" == *"|$abs_path|"* ]]; then
+    continue
+  fi
+  
+  # Mark as processed
+  processed_files_list="${processed_files_list}|$abs_path|"
   
   # Check if file exists and is readable
   if [[ ! -f "$f" ]] || [[ ! -r "$f" ]]; then
