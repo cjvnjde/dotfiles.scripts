@@ -1,0 +1,3 @@
+[submodule "clipboard-code"]
+	path = clipboard-code
+	url = git@github.com:cjvnjde/clipboard-code.git
