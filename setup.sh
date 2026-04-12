@@ -29,13 +29,11 @@ enable() {
   unlink_path "$MODULE_DIR" "$DEST_DIR"
   ensure_directory "$DEST_DIR"
 
-  link_path "$MODULE_DIR/backup_gpg.sh" "$DEST_DIR/backup_gpg.sh"
-  link_path "$MODULE_DIR/restore_gpg.sh" "$DEST_DIR/restore_gpg.sh"
-  link_path "$MODULE_DIR/save_installed_packages.sh" "$DEST_DIR/save_installed_packages.sh"
-  link_path "$MODULE_DIR/update-arch.sh" "$DEST_DIR/update-arch.sh"
-  link_path "$MODULE_DIR/lfub" "$DEST_DIR/lfub"
-  link_path "$MODULE_DIR/tmux-sessionizer" "$DEST_DIR/tmux-sessionizer"
-  link_path "$MODULE_DIR/vidthumb" "$DEST_DIR/vidthumb"
+  link_path "$MODULE_DIR/backup_gpg.sh" "$DEST_DIR/backup_gpg"
+  link_path "$MODULE_DIR/restore_gpg.sh" "$DEST_DIR/restore_gpg"
+  link_path "$MODULE_DIR/save_installed_packages.sh" "$DEST_DIR/save_installed_packages"
+  link_path "$MODULE_DIR/update_arch.sh" "$DEST_DIR/update_arch"
+  link_path "$MODULE_DIR/tmux_sessionizer.sh" "$DEST_DIR/tmux_sessionizer"
   link_path "$MODULE_DIR/clipboard-code/clipboard-code.sh" "$DEST_DIR/clipboard-code"
   link_path "$MODULE_DIR/clipboard-code/clipboard-code.sh" "$DEST_DIR/ccode"
 }
