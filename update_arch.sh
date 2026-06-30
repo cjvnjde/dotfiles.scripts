@@ -4,7 +4,7 @@ IFS=$'\n\t'
 
 usage() {
   cat <<'EOF'
-Usage: update-arch.sh [options]
+Usage: update_arch.sh [options]
 
 Update as much user/system software as possible on this Arch machine.
 
@@ -112,6 +112,80 @@ append_unique() {
   target+=("$value")
 }
 
+path_in_path() {
+  local dir="$1"
+  [[ -n "$dir" ]] || return 1
+  case ":$PATH:" in
+    *":$dir:"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+prepend_path_once() {
+  local dir="$1"
+  [[ -n "$dir" ]] || return 0
+  if ! path_in_path "$dir"; then
+    PATH="$dir:$PATH"
+    export PATH
+  fi
+}
+
+is_non_registry_package_spec() {
+  local spec="$1"
+  [[ -n "$spec" ]] || return 1
+
+  case "$spec" in
+    link:*|file:*|workspace:*|portal:*|catalog:*|git:*|git+*|github:*|gitlab:*|bitbucket:*|http://*|https://*|ssh://*|/*|./*|../*|~/*)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+is_pacman_managed_path() {
+  local path="$1"
+  has_cmd pacman || return 1
+  pacman -Qo "$path" >/dev/null 2>&1 && return 0
+  [[ -e "$path/package.json" ]] && pacman -Qo "$path/package.json" >/dev/null 2>&1
+}
+
+ensure_pnpm_global_bin_on_path() {
+  local pnpm_home="${PNPM_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/pnpm}"
+  PNPM_HOME="$pnpm_home"
+  export PNPM_HOME
+
+  local configured_bin add_legacy_home=0
+  configured_bin="$(pnpm config get global-bin-dir 2>/dev/null || true)"
+  case "$configured_bin" in
+    ''|undefined|null)
+      PNPM_GLOBAL_BIN_DIR="$pnpm_home/bin"
+      add_legacy_home=1
+      ;;
+    ~/*)
+      PNPM_GLOBAL_BIN_DIR="$HOME/${configured_bin#~/}"
+      ;;
+    *)
+      PNPM_GLOBAL_BIN_DIR="$configured_bin"
+      ;;
+  esac
+
+  prepend_path_once "$PNPM_GLOBAL_BIN_DIR"
+  if [[ "$add_legacy_home" -eq 1 ]]; then
+    prepend_path_once "$pnpm_home"
+  fi
+}
+
+ensure_bun_global_bin_on_path() {
+  local bun_home="${BUN_INSTALL:-$HOME/.bun}"
+  BUN_INSTALL="$bun_home"
+  export BUN_INSTALL
+
+  BUN_GLOBAL_BIN_DIR="$bun_home/bin"
+  prepend_path_once "$BUN_GLOBAL_BIN_DIR"
+}
+
 find_python_cmd() {
   if has_cmd python3; then
     printf 'python3\n'
@@ -123,7 +197,14 @@ find_python_cmd() {
 }
 
 is_mise_managed() {
-  has_cmd mise && mise which "$1" >/dev/null 2>&1
+  has_cmd mise || return 1
+
+  local tool_path mise_path
+  tool_path="$(command -v "$1" 2>/dev/null || true)"
+  mise_path="$(mise which "$1" 2>/dev/null || true)"
+  [[ -n "$tool_path" && -n "$mise_path" ]] || return 1
+
+  [[ "$tool_path" == "$mise_path" || "$tool_path" == "$HOME/.local/share/mise/"* || "$tool_path" == */mise/shims/* ]]
 }
 
 build_tool_cmd() {
@@ -154,7 +235,7 @@ start_sudo_keepalive() {
 }
 
 cleanup() {
-  if [[ -n "$SUDO_KEEPALIVE_PID" ]]; then
+  if [[ -n "${SUDO_KEEPALIVE_PID:-}" ]]; then
     kill "$SUDO_KEEPALIVE_PID" >/dev/null 2>&1 || true
   fi
 }
@@ -167,7 +248,7 @@ prepare_sudo() {
     return 0
   fi
 
-  if ! has_cmd pacman && ! has_cmd flatpak; then
+  if ! has_cmd pacman && ! has_cmd flatpak && [[ "$NPM_GLOBAL_NEEDS_SUDO" -ne 1 ]]; then
     return 0
   fi
 
@@ -177,14 +258,17 @@ prepare_sudo() {
     start_sudo_keepalive
     log_ok "sudo session ready"
   else
-    log_warn "sudo authentication failed; pacman and system flatpak updates will fail."
+    log_warn "sudo authentication failed; privileged pacman, flatpak, and npm updates will fail."
   fi
 }
 
 discover_npm_globals() {
   NPM_GLOBAL_PACKAGES=()
+  NPM_GLOBAL_RECORDS=()
   NPM_GLOBALS_OK=1
   NPM_GLOBALS_REASON=""
+  NPM_GLOBAL_PREFIX=""
+  NPM_GLOBAL_NEEDS_SUDO=0
 
   if ! has_cmd npm; then
     return 0
@@ -198,9 +282,9 @@ discover_npm_globals() {
     return 0
   fi
 
-  if [[ "$prefix" != "$HOME"* && ! -w "$prefix" ]]; then
-    NPM_GLOBALS_OK=0
-    NPM_GLOBALS_REASON="npm global prefix looks system-managed: $prefix"
+  NPM_GLOBAL_PREFIX="$prefix"
+  if [[ ! -w "$prefix" ]]; then
+    NPM_GLOBAL_NEEDS_SUDO=1
   fi
 
   local line pkg lower
@@ -212,7 +296,145 @@ discover_npm_globals() {
       npm|corepack) continue ;;
     esac
     append_unique NPM_GLOBAL_PACKAGES "$pkg"
+    NPM_GLOBAL_RECORDS+=("$pkg"$'\t'"$line")
   done < <(npm ls -g --depth=0 --parseable 2>/dev/null || true)
+}
+
+discover_pnpm_globals() {
+  PNPM_GLOBAL_PACKAGES=()
+  PNPM_GLOBAL_RECORDS=()
+  PNPM_GLOBALS_OK=1
+  PNPM_GLOBALS_REASON=""
+
+  if ! has_cmd pnpm; then
+    return 0
+  fi
+
+  ensure_pnpm_global_bin_on_path
+
+  local json
+  if ! json="$(pnpm ls -g --depth=0 --json 2>/dev/null)"; then
+    PNPM_GLOBALS_OK=0
+    PNPM_GLOBALS_REASON="could not list pnpm globals (global bin dir may not be configured)"
+    return 0
+  fi
+
+  local line pkg spec
+  if [[ -n "$PYTHON_CMD" ]]; then
+    while IFS= read -r line; do
+      [[ -n "$line" ]] || continue
+      pkg="${line%%$'\t'*}"
+      spec=""
+      if [[ "$line" == *$'\t'* ]]; then
+        spec="${line#*$'\t'}"
+      fi
+      append_unique PNPM_GLOBAL_PACKAGES "$pkg"
+      PNPM_GLOBAL_RECORDS+=("$pkg"$'\t'"$spec")
+    done < <(printf '%s' "$json" | "$PYTHON_CMD" -c 'import json, pathlib, sys
+
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+
+if isinstance(data, dict):
+    projects = [data]
+elif isinstance(data, list):
+    projects = data
+else:
+    projects = []
+
+
+def dependency_spec(name, dep_path):
+    if not dep_path:
+        return ""
+    try:
+        path = pathlib.Path(dep_path)
+        parts = path.parts
+        index = None
+        for i, part in enumerate(parts):
+            if part == "node_modules":
+                index = i
+        if index is None:
+            return ""
+        manifest = pathlib.Path(*parts[:index]) / "package.json"
+        package = json.loads(manifest.read_text(encoding="utf-8"))
+    except Exception:
+        return ""
+
+    for section in ("dependencies", "devDependencies", "optionalDependencies"):
+        spec = (package.get(section) or {}).get(name)
+        if spec:
+            return str(spec)
+    return ""
+
+for project in projects:
+    dependencies = project.get("dependencies") or {}
+    for name, info in dependencies.items():
+        dep_path = info.get("path", "") if isinstance(info, dict) else ""
+        print(f"{name}\t{dependency_spec(name, dep_path)}")')
+  else
+    while IFS= read -r line; do
+      [[ "$line" == *"/node_modules/"* ]] || continue
+      pkg="${line##*/node_modules/}"
+      append_unique PNPM_GLOBAL_PACKAGES "$pkg"
+      PNPM_GLOBAL_RECORDS+=("$pkg"$'\t')
+    done < <(pnpm ls -g --depth=0 --parseable 2>/dev/null || true)
+  fi
+}
+
+discover_bun_globals() {
+  BUN_GLOBAL_PACKAGES=()
+  BUN_GLOBAL_RECORDS=()
+  BUN_GLOBALS_OK=1
+  BUN_GLOBALS_REASON=""
+
+  if ! has_cmd bun; then
+    return 0
+  fi
+
+  ensure_bun_global_bin_on_path
+
+  local manifest="${BUN_INSTALL%/}/install/global/package.json"
+  if [[ ! -f "$manifest" ]]; then
+    return 0
+  fi
+
+  if [[ -z "$PYTHON_CMD" ]]; then
+    BUN_GLOBALS_OK=0
+    BUN_GLOBALS_REASON="python not found to parse bun global package.json"
+    return 0
+  fi
+
+  local line pkg spec
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    pkg="${line%%$'\t'*}"
+    spec=""
+    if [[ "$line" == *$'\t'* ]]; then
+      spec="${line#*$'\t'}"
+    fi
+    append_unique BUN_GLOBAL_PACKAGES "$pkg"
+    BUN_GLOBAL_RECORDS+=("$pkg"$'\t'"$spec")
+  done < <("$PYTHON_CMD" - "$manifest" <<'PY'
+import json
+import sys
+
+try:
+    with open(sys.argv[1], 'r', encoding='utf-8') as f:
+        package = json.load(f)
+except Exception:
+    sys.exit(0)
+
+seen = set()
+for section in ('dependencies', 'devDependencies', 'optionalDependencies'):
+    for name, spec in (package.get(section) or {}).items():
+        if name in seen:
+            continue
+        seen.add(name)
+        print(f'{name}\t{spec}')
+PY
+)
 }
 
 discover_pip_user_packages() {
@@ -318,6 +540,8 @@ PY
 discovery_summary() {
   heading "discovery"
   discover_npm_globals
+  discover_pnpm_globals
+  discover_bun_globals
   discover_pip_user_packages
   discover_go_modules
   discover_cargo_installs
@@ -325,6 +549,16 @@ discovery_summary() {
   log_info "npm globals to refresh: ${#NPM_GLOBAL_PACKAGES[@]}"
   if [[ "$NPM_GLOBALS_OK" -ne 1 ]]; then
     log_warn "$NPM_GLOBALS_REASON"
+  elif [[ "$NPM_GLOBAL_NEEDS_SUDO" -eq 1 ]]; then
+    log_warn "npm global prefix needs sudo: $NPM_GLOBAL_PREFIX"
+  fi
+  log_info "pnpm globals to refresh: ${#PNPM_GLOBAL_PACKAGES[@]}"
+  if [[ "$PNPM_GLOBALS_OK" -ne 1 ]]; then
+    log_warn "$PNPM_GLOBALS_REASON"
+  fi
+  log_info "bun globals to refresh: ${#BUN_GLOBAL_PACKAGES[@]}"
+  if [[ "$BUN_GLOBALS_OK" -ne 1 ]]; then
+    log_warn "$BUN_GLOBALS_REASON"
   fi
   log_info "pip user packages: ${#PIP_USER_PACKAGES[@]}"
   log_info "go-installed binaries: ${#GO_MODULES[@]}"
@@ -560,20 +794,66 @@ update_npm_globals() {
     record_skip "$label" "$NPM_GLOBALS_REASON"
     return 0
   fi
-  if [[ "${#NPM_GLOBAL_PACKAGES[@]}" -eq 0 ]]; then
+  if [[ "${#NPM_GLOBAL_RECORDS[@]}" -eq 0 ]]; then
     record_skip "$label" "no non-core npm globals found"
     return 0
   fi
 
-  local -a packages=()
-  local pkg
-  for pkg in "${NPM_GLOBAL_PACKAGES[@]}"; do
-    packages+=("${pkg}@latest")
+  heading "$label"
+
+  local attempted=0
+  local skipped=0
+  local failed=0
+  local record pkg path
+  local -a cmd=()
+
+  for record in "${NPM_GLOBAL_RECORDS[@]}"; do
+    IFS=$'\t' read -r pkg path <<< "$record"
+
+    if [[ -n "$path" && -L "$path" ]]; then
+      skipped=$((skipped + 1))
+      log_skip "$pkg (linked package: $path)"
+      continue
+    fi
+
+    if [[ -n "$path" ]] && is_pacman_managed_path "$path"; then
+      skipped=$((skipped + 1))
+      log_skip "$pkg (managed by pacman)"
+      continue
+    fi
+
+    if [[ "$NPM_GLOBAL_NEEDS_SUDO" -eq 1 ]]; then
+      if [[ "$SUDO_AVAILABLE" -ne 1 ]]; then
+        skipped=$((skipped + 1))
+        log_skip "$pkg (requires sudo for $NPM_GLOBAL_PREFIX)"
+        continue
+      fi
+      cmd=(sudo env "PATH=$PATH" npm install -g --prefix "$NPM_GLOBAL_PREFIX" "${pkg}@latest")
+    else
+      build_tool_cmd cmd npm install -g "${pkg}@latest"
+    fi
+
+    attempted=$((attempted + 1))
+    print_command "${cmd[@]}"
+    if "${cmd[@]}"; then
+      log_ok "$pkg"
+    else
+      failed=1
+      log_err "$pkg failed"
+    fi
   done
 
-  local -a cmd=()
-  build_tool_cmd cmd npm install -g "${packages[@]}"
-  run_step "$label" "${cmd[@]}"
+  if [[ "$attempted" -eq 0 ]]; then
+    if [[ "$skipped" -gt 0 ]]; then
+      record_skip "$label" "all discovered packages were skipped"
+    else
+      record_skip "$label" "nothing updateable found"
+    fi
+  elif [[ "$failed" -eq 1 ]]; then
+    record_failure "$label"
+  else
+    record_success "$label"
+  fi
 }
 
 update_pnpm_globals() {
@@ -582,16 +862,92 @@ update_pnpm_globals() {
     record_skip "$label" "pnpm not found"
     return 0
   fi
+  if [[ "$PNPM_GLOBALS_OK" -ne 1 ]]; then
+    record_skip "$label" "$PNPM_GLOBALS_REASON"
+    return 0
+  fi
+  if [[ "${#PNPM_GLOBAL_RECORDS[@]}" -eq 0 ]]; then
+    record_skip "$label" "no pnpm globals found"
+    return 0
+  fi
 
+  ensure_pnpm_global_bin_on_path
+  heading "$label"
+
+  local attempted=0
+  local skipped=0
+  local failed=0
+  local record pkg spec
   local -a cmd=()
-  build_tool_cmd cmd pnpm update -g --latest
-  run_step "$label" "${cmd[@]}"
+  local -a args=()
+
+  for record in "${PNPM_GLOBAL_RECORDS[@]}"; do
+    IFS=$'\t' read -r pkg spec <<< "$record"
+
+    if is_non_registry_package_spec "$spec"; then
+      skipped=$((skipped + 1))
+      log_skip "$pkg (non-registry spec: $spec)"
+      continue
+    fi
+
+    args=(update -g --latest)
+    if [[ "$AUTO_YES" -eq 1 ]]; then
+      args+=(--yes)
+    fi
+    args+=("$pkg")
+    build_tool_cmd cmd pnpm "${args[@]}"
+
+    attempted=$((attempted + 1))
+    print_command "${cmd[@]}"
+    if "${cmd[@]}"; then
+      log_ok "$pkg"
+    else
+      failed=1
+      log_err "$pkg failed"
+    fi
+  done
+
+  if [[ "$attempted" -eq 0 ]]; then
+    if [[ "$skipped" -gt 0 ]]; then
+      record_skip "$label" "only non-registry globals found"
+    else
+      record_skip "$label" "nothing updateable found"
+    fi
+  elif [[ "$failed" -eq 1 ]]; then
+    record_failure "$label"
+  else
+    record_success "$label"
+  fi
 }
 
 update_bun_globals() {
   local label="bun global packages"
   if ! has_cmd bun; then
     record_skip "$label" "bun not found"
+    return 0
+  fi
+  if [[ "$BUN_GLOBALS_OK" -ne 1 ]]; then
+    record_skip "$label" "$BUN_GLOBALS_REASON"
+    return 0
+  fi
+  if [[ "${#BUN_GLOBAL_RECORDS[@]}" -eq 0 ]]; then
+    record_skip "$label" "no bun globals found"
+    return 0
+  fi
+
+  ensure_bun_global_bin_on_path
+
+  local registry_packages=0
+  local record pkg spec
+  for record in "${BUN_GLOBAL_RECORDS[@]}"; do
+    IFS=$'\t' read -r pkg spec <<< "$record"
+    if ! is_non_registry_package_spec "$spec"; then
+      registry_packages=$((registry_packages + 1))
+    fi
+  done
+
+  if [[ "$registry_packages" -eq 0 ]]; then
+    record_skip "$label" "only non-registry globals found"
     return 0
   fi
 
@@ -691,12 +1047,25 @@ PYTHON_CMD="$(find_python_cmd)"
 UV_MANAGED_BY_CARGO=0
 NPM_GLOBALS_OK=1
 NPM_GLOBALS_REASON=""
+NPM_GLOBAL_PREFIX=""
+NPM_GLOBAL_NEEDS_SUDO=0
+PNPM_GLOBALS_OK=1
+PNPM_GLOBALS_REASON=""
+PNPM_GLOBAL_BIN_DIR=""
+BUN_GLOBALS_OK=1
+BUN_GLOBALS_REASON=""
+BUN_GLOBAL_BIN_DIR=""
 
 declare -a SUCCEEDED=()
 declare -a FAILED=()
 declare -a SKIPPED=()
 
 declare -a NPM_GLOBAL_PACKAGES=()
+declare -a NPM_GLOBAL_RECORDS=()
+declare -a PNPM_GLOBAL_PACKAGES=()
+declare -a PNPM_GLOBAL_RECORDS=()
+declare -a BUN_GLOBAL_PACKAGES=()
+declare -a BUN_GLOBAL_RECORDS=()
 declare -a PIP_USER_PACKAGES=()
 declare -a GO_MODULES=()
 declare -a CARGO_RECORDS=()
@@ -724,7 +1093,7 @@ if [[ "$EUID" -eq 0 ]]; then
   exit 1
 fi
 
-heading "update-arch"
+heading "update_arch"
 log_info "Starting full-system update"
 if [[ "$AUTO_YES" -eq 1 ]]; then
   log_info "Auto-yes mode enabled"
