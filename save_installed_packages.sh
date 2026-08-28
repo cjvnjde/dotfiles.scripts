@@ -1,3 +1,3 @@
-pacman -Qqe | grep -v "$(pacman -Qqm)" > ./packages/official_packages.txt
-pacman -Qqm > ./packages/aur_packages.txt
+pacman -Qqen > ./packages/official_packages.txt
+pacman -Qqem > ./packages/aur_packages.txt
 
