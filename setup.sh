@@ -40,13 +40,11 @@ enable() {
 
 disable() {
   unlink_path "$MODULE_DIR" "$DEST_DIR"
-  unlink_path "$MODULE_DIR/backup_gpg.sh" "$DEST_DIR/backup_gpg.sh"
-  unlink_path "$MODULE_DIR/restore_gpg.sh" "$DEST_DIR/restore_gpg.sh"
-  unlink_path "$MODULE_DIR/save_installed_packages.sh" "$DEST_DIR/save_installed_packages.sh"
-  unlink_path "$MODULE_DIR/update-arch.sh" "$DEST_DIR/update-arch.sh"
-  unlink_path "$MODULE_DIR/lfub" "$DEST_DIR/lfub"
-  unlink_path "$MODULE_DIR/tmux-sessionizer" "$DEST_DIR/tmux-sessionizer"
-  unlink_path "$MODULE_DIR/vidthumb" "$DEST_DIR/vidthumb"
+  unlink_path "$MODULE_DIR/backup_gpg.sh" "$DEST_DIR/backup_gpg"
+  unlink_path "$MODULE_DIR/restore_gpg.sh" "$DEST_DIR/restore_gpg"
+  unlink_path "$MODULE_DIR/save_installed_packages.sh" "$DEST_DIR/save_installed_packages"
+  unlink_path "$MODULE_DIR/update_arch.sh" "$DEST_DIR/update_arch"
+  unlink_path "$MODULE_DIR/tmux_sessionizer.sh" "$DEST_DIR/tmux_sessionizer"
   unlink_path "$MODULE_DIR/clipboard-code/clipboard-code.sh" "$DEST_DIR/clipboard-code"
   unlink_path "$MODULE_DIR/clipboard-code/clipboard-code.sh" "$DEST_DIR/ccode"
   rmdir_if_empty "$DEST_DIR"
