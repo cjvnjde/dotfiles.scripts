@@ -34,6 +34,7 @@ enable() {
   link_path "$MODULE_DIR/save_installed_packages.sh" "$DEST_DIR/save_installed_packages"
   link_path "$MODULE_DIR/update_arch.sh" "$DEST_DIR/update_arch"
   link_path "$MODULE_DIR/tmux_sessionizer.sh" "$DEST_DIR/tmux_sessionizer"
+  link_path "$MODULE_DIR/ports.sh" "$DEST_DIR/ports"
   link_path "$MODULE_DIR/clipboard-code/clipboard-code.sh" "$DEST_DIR/clipboard-code"
   link_path "$MODULE_DIR/clipboard-code/clipboard-code.sh" "$DEST_DIR/ccode"
 }
@@ -45,6 +46,7 @@ disable() {
   unlink_path "$MODULE_DIR/save_installed_packages.sh" "$DEST_DIR/save_installed_packages"
   unlink_path "$MODULE_DIR/update_arch.sh" "$DEST_DIR/update_arch"
   unlink_path "$MODULE_DIR/tmux_sessionizer.sh" "$DEST_DIR/tmux_sessionizer"
+  unlink_path "$MODULE_DIR/ports.sh" "$DEST_DIR/ports"
   unlink_path "$MODULE_DIR/clipboard-code/clipboard-code.sh" "$DEST_DIR/clipboard-code"
   unlink_path "$MODULE_DIR/clipboard-code/clipboard-code.sh" "$DEST_DIR/ccode"
   rmdir_if_empty "$DEST_DIR"
