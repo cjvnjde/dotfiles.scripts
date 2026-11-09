@@ -25,30 +25,28 @@ DEST_DIR="$HOME/.local/scripts"
 
 source "$ROOT_DIR/setup/lib.sh"
 
+manage_scripts() {
+  local operation="$1" script name
+  for script in "$MODULE_DIR"/*.sh; do
+    [ -f "$script" ] || continue
+    name="${script##*/}"
+    case "$name" in
+      setup.sh|setup-*.sh) continue ;;
+    esac
+    "$operation" "$script" "$DEST_DIR/${name%.sh}"
+  done
+}
+
 enable() {
   unlink_path "$MODULE_DIR" "$DEST_DIR"
   ensure_directory "$DEST_DIR"
 
-  link_path "$MODULE_DIR/backup_gpg.sh" "$DEST_DIR/backup_gpg"
-  link_path "$MODULE_DIR/restore_gpg.sh" "$DEST_DIR/restore_gpg"
-  link_path "$MODULE_DIR/save_installed_packages.sh" "$DEST_DIR/save_installed_packages"
-  link_path "$MODULE_DIR/update_arch.sh" "$DEST_DIR/update_arch"
-  link_path "$MODULE_DIR/tmux_sessionizer.sh" "$DEST_DIR/tmux_sessionizer"
-  link_path "$MODULE_DIR/ports.sh" "$DEST_DIR/ports"
-  link_path "$MODULE_DIR/clipboard-code/clipboard-code.sh" "$DEST_DIR/clipboard-code"
-  link_path "$MODULE_DIR/clipboard-code/clipboard-code.sh" "$DEST_DIR/ccode"
+  manage_scripts link_path
 }
 
 disable() {
   unlink_path "$MODULE_DIR" "$DEST_DIR"
-  unlink_path "$MODULE_DIR/backup_gpg.sh" "$DEST_DIR/backup_gpg"
-  unlink_path "$MODULE_DIR/restore_gpg.sh" "$DEST_DIR/restore_gpg"
-  unlink_path "$MODULE_DIR/save_installed_packages.sh" "$DEST_DIR/save_installed_packages"
-  unlink_path "$MODULE_DIR/update_arch.sh" "$DEST_DIR/update_arch"
-  unlink_path "$MODULE_DIR/tmux_sessionizer.sh" "$DEST_DIR/tmux_sessionizer"
-  unlink_path "$MODULE_DIR/ports.sh" "$DEST_DIR/ports"
-  unlink_path "$MODULE_DIR/clipboard-code/clipboard-code.sh" "$DEST_DIR/clipboard-code"
-  unlink_path "$MODULE_DIR/clipboard-code/clipboard-code.sh" "$DEST_DIR/ccode"
+  manage_scripts unlink_path
   rmdir_if_empty "$DEST_DIR"
 }
 
